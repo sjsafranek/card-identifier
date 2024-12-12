@@ -4,7 +4,6 @@ import tarot
 
 if __name__ == "__main__":
     
-
     # File paths
     test_image_path = "../data/images/2_of_cups.jpg"  # Replace with your test image file name
     #test_image_path = "../data/tests/20241130_135912.jpg"
