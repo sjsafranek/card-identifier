@@ -15,10 +15,26 @@ model = YOLO("yolo11n.pt")
 # metrics = model.val()
 
 # Perform object detection on an image
-results = model("datasets/coco8/images/val/000000000049.jpg")
+#results = model("datasets/tarot/images/train/10_of_coins.jpg")
+# results = model("datasets/tarot/images/train/2_of_cups.jpg")
+#results = model("datasets/tarot/images/train/3_of_wands.jpg")
+
+#results = model("attic/testing_20241209/images/knight.jpg")
+#results = model("attic/testing_20241209/images/knight2.jpg")
+#results = model("attic/testing_20241209/images/comet.jpg")
+#results = model("attic/testing_20241209/images/euryale.jpg")
+
 results[0].show()
 
-print(results[0])
+for result in results:
+    print(dir(result))
+    # print(result.boxes)  # Boxes object for bounding box outputs
+    # print(result.masks)  # Masks object for segmentation masks outputs
+    # print(result.keypoints)  # Keypoints object for pose outputs
+    # print(result.probs)  # Probs object for classification outputs
+    # print(result.obb)  # Oriented boxes object for OBB outputs	
+    # print(result.to_json())
+    print(result.to_df())
 
 ## Export the model to ONNX format
 #path = model.export(format="onnx")  # return path to exported model
