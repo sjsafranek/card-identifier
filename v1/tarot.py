@@ -2,18 +2,18 @@ import os
 import glob
 import json
 import numpy
-import statistics
+import pandas
 from PIL import Image
+import cv2
 import clip
 import torch
-import cv2
 from sklearn.metrics.pairwise import cosine_similarity
 
 
 ALLOWED_FILE_TYPES = (".jpg", ".png")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL, PREPROCESS = clip.load("ViT-B/32", device=DEVICE)
-
+KERNEL_SIZE = (5, 5)
 
 class ImageModel(object):
 
@@ -27,10 +27,10 @@ class ImageModel(object):
             for filename in os.listdir(directory_path):
                 if filename.endswith(ALLOWED_FILE_TYPES):
                     image_path = os.path.join(directory_path, filename)
-                    name = os.path.splitext(filename)[0]  # Use the filename (without extension) as the card name
+                    #name = os.path.splitext(filename)[0]  # Use the filename (without extension) as the card name
                     print(f'Processing {image_path}')
                     embedding = processAndEncodeImage(file_path=image_path).cpu().numpy().tolist()
-                    self.embeddings.append({'name': name, 'embedding': embedding})
+                    self.embeddings.append({'name': directory_name, 'embedding': embedding})
 
     def export(self, file_path):
         with open(file_path, "w") as fh:
@@ -60,18 +60,33 @@ class ImageModel(object):
             if similarity > highest_similarity:
                 highest_similarity = similarity
                 best_match = name
+            if similarity >= 1:
+                break
 
-        return best_match, highest_similarity
+        return pandas.DataFrame([{'name': best_match, 'score': highest_similarity}])
 
-    def detect(self, image_path):
+    def detect(self, image_path, min_score = 0.75):
+        # Lets be lazy and cheat...
+        df = self.identify(image_path)
+        if df['score'].max() > 0.95:
+            return df
+        #
         img = openImage(image_path)
         cropped_cards = detect_and_crop_cards(img)
-        print(f'Detected {len(cropped_cards)} cards')
-        for i, card_image in enumerate(cropped_cards):
-            card_image.save(f'crop_{1}.jpg')
-            image_embedding = processAndEncodeImage(image=card_image)
-            yield self.identify(image_embedding)
-
+        matches = []
+        # TODO :: Use multiprocess
+        for i, card in enumerate(cropped_cards):
+            image_embedding = processAndEncodeImage(image=card['image'])
+            match = self.identify(image_embedding)
+            matches.append({
+                'name': match.iloc[0]['name'],
+                'score': match.iloc[0]['score'],
+                'rect': card['rect']
+            })
+        df = pandas.DataFrame(matches)
+        df = df[df['score'] > min_score]
+        indices = df.groupby('name')['score'].idxmax()
+        return df.loc[indices]
 
     @staticmethod
     def load(self, file_path):
@@ -115,15 +130,16 @@ def detect_and_crop_cards(uploaded_image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     # Apply Gaussian blur to reduce noise
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    blurred = cv2.GaussianBlur(gray, KERNEL_SIZE, 0)
 
     # Adaptive thresholding for binary segmentation
     thresh = cv2.adaptiveThreshold(
-        blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
+        # blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
+        blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 10
     )
 
     # Dilate to close gaps
-    kernel = numpy.ones((5, 5), numpy.uint8)
+    kernel = numpy.ones(KERNEL_SIZE, numpy.uint8)
     dilated = cv2.dilate(thresh, kernel, iterations=2)
 
     # Find contours
@@ -131,18 +147,14 @@ def detect_and_crop_cards(uploaded_image):
 
     # Filter contours by size
     min_area = 20000  # Adjust based on card size
-    # areas = [cv2.contourArea(c) for c in contours if cv2.contourArea(c)]
-    print(min(areas))
-    print(max(areas))
-    print(statistics.mean(areas))
-    print(statistics.stdev(areas))
     filtered_contours = [c for c in contours if cv2.contourArea(c) > min_area]
     bounding_boxes = [cv2.boundingRect(c) for c in filtered_contours]
 
     # Debug: Draw filtered contours
     debug_image_filtered = image.copy()
     for x, y, w, h in bounding_boxes:
-        cv2.rectangle(debug_image_filtered, (x, y), (x + w, y + h), (255, 0, 0), 2)
+        cv2.rectangle(debug_image_filtered, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    cv2.imwrite(f'tmp/boxes_filtered.jpg', debug_image_filtered)
 
     # Merge nearby bounding boxes
     merged_boxes = merge_nearby_boxes(bounding_boxes, threshold=50)  # Adjust threshold as needed
@@ -151,25 +163,31 @@ def detect_and_crop_cards(uploaded_image):
     cropped_cards = []
     for x, y, w, h in merged_boxes:
         # Stefan - checking the aspect ratio seems to give false negatives...
-        # aspect_ratio = w / h
-        # if 0.5 < aspect_ratio < 2.0:  # Ensure only plausible card shapes are detected
-        padding = 10
-        x = max(x - padding, 0)
-        y = max(y - padding, 0)
-        w = min(w + 2 * padding, image.shape[1] - x)
-        h = min(h + 2 * padding, image.shape[0] - y)
-        card = image[y : y + h, x : x + w]
-        cropped_cards.append(Image.fromarray(card))
+        aspect_ratio = w / h
+        if 0.5 < aspect_ratio < 2.0:  # Ensure only plausible card shapes are detected
+            padding = 10
+            x = max(x - padding, 0)
+            y = max(y - padding, 0)
+            w = min(w + 2 * padding, image.shape[1] - x)
+            h = min(h + 2 * padding, image.shape[0] - y)
+            card = image[y : y + h, x : x + w]
+            cropped_cards.append({
+                'rect': {
+                    'x': x,
+                    'y': y,
+                    'w': w,
+                    'h': h
+                },
+                'image': Image.fromarray(card)
+            })
 
     # Debug: Draw merged boxes
-    debug_image_merged = image.copy()
+    image_with_boxes = image.copy()
     for x, y, w, h in merged_boxes:
-        cv2.rectangle(debug_image_merged, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.rectangle(image_with_boxes, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    cv2.imwrite(f'tmp/boxes_merged.jpg', image_with_boxes)
 
     return cropped_cards
-
-
-
 
 
 def merge_nearby_boxes(boxes, threshold=20):  # Reduce threshold
@@ -177,7 +195,7 @@ def merge_nearby_boxes(boxes, threshold=20):  # Reduce threshold
     for box in boxes:
         x, y, w, h = box
         new_box = True
-        for i, (mx, my, mw, mh) in enumerate(merged_boxes):
+        for (mx, my, mw, mh) in merged_boxes:
             # Check if the boxes overlap or are close to each other
             if (
                 abs(x - mx) < threshold and abs(y - my) < threshold
@@ -185,15 +203,56 @@ def merge_nearby_boxes(boxes, threshold=20):  # Reduce threshold
                 and abs((y + h) - (my + mh)) < threshold
             ):
                 # Merge boxes
-                merged_boxes[i] = (
-                    min(x, mx),
-                    min(y, my),
-                    max(x + w, mx + mw) - min(x, mx),
-                    max(y + h, my + mh) - min(y, my),
-                )
+                merged_boxes[i] = merge_boxes(box, (mx, my, mw, mh))
                 new_box = False
                 break
+            # elif contains(box, (mx, my, mw, mh)):
+            #     new_box = False
+            # elif contains((mx, my, mw, mh), box):
+            #     new_box = False
         if new_box:
             merged_boxes.append((x, y, w, h))
     return merged_boxes
+
+
+def merge_boxes(box1, box2):
+    x1, y1, w1, h1 = box1
+    x2, y2, w2, h2 = box2
+    return (
+        min(x1, x2),
+        min(y1, y2),
+        max(x1 + w1, x2 + w2) - min(x1, x2),
+        max(y1 + h1, y2 + h2) - min(y1, y2),
+    )
+
+
+# # Separating Axis Theorem
+# def intersects(rect1, rect2):
+#     return not (rect1.top_right.x < rect2.bottom_left.x
+#                 or rect1.bottom_left.x > rect2.top_right.x
+#                 or rect1.top_right.y < rect2.bottom_left.y
+#                 or rect1.bottom_left.y > rect2.top_right.y)
+
+
+def getPoints(rect):
+    x1, y1, w, h = rect
+    x2 = x1 + w
+    y2 = y1 + h
+    return [
+        (x1, y1),
+        (x1, y2),
+        (x2, y2),
+        (x2, y1)
+    ]
+
+def contains(rect, point):
+    if 4 == len(point):
+        for pt in getPoints(point):
+            if not contains(rect, pt):
+                return False
+        return True
+    points = getPoints(rect)
+    bl = points[0]
+    tr = points[2]
+    return (point[0] > bl[0] and point[0] < tr[0] and point[1] > bl[1] and point[1] < tr[1]) 
 

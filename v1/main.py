@@ -30,15 +30,13 @@ if __name__ == "__main__":
 
     elif "identify" == args.action.lower():
         model = tarot.load(dataset_file)
-        card_name, similarity_score = model.identify(args.filename)
-        print(f"Identified Card: {card_name}")
-        print(f"Similarity Score: {similarity_score}")
+        df = model.identify(args.filename)
+        print(df)
 
     elif "detect" == args.action.lower():
         model = tarot.load(dataset_file)
-        for card_name, similarity_score in model.detect(args.filename):
-            print(f"Identified Card: {card_name}")
-            print(f"Similarity Score: {similarity_score}")
+        df = model.detect(args.filename)
+        print(df)
 
 
 
@@ -46,13 +44,20 @@ if __name__ == "__main__":
 
 python main.py --directory ../data/dataset tarot train
 
-
 python main.py --filename ../data/dataset/2_of_cups/2_of_cups.jpg tarot identify
-
+python main.py --filename ../data/dataset/the_battle/the_battle.jpg tarot identify
 
 python main.py --filename ../data/dataset/2_of_cups/2_of_cups.jpg tarot detect
+python main.py --filename ../data/dataset/the_battle/the_battle.jpg tarot detect
+python main.py --filename ../data/dataset/the_battle/PXL_20241212_202334571.jpg tarot detect
 
 python main.py --filename ../data/tests/20241130_135912.jpg tarot detect
+
+python main.py --filename ../data/tests/20241130_135931.jpg tarot detect
+
+python main.py --filename ../data/tests/20241130_135940.jpg tarot detect
+
+python main.py --filename ../data/tests/1000004734.jpg tarot detect
 
 
 
