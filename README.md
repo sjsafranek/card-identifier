@@ -24,3 +24,14 @@ pip install torchvision
 
 
 pip install ultralytics 
+
+
+
+
+
+
+
+
+#
+90 - 95 in train
+10 - 5 in val

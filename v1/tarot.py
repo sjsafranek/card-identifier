@@ -15,6 +15,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL, PREPROCESS = clip.load("ViT-B/32", device=DEVICE)
 KERNEL_SIZE = (5, 5)
 
+
 class ImageModel(object):
 
     def __init__(self, embeddings=[]):
@@ -27,7 +28,6 @@ class ImageModel(object):
             for filename in os.listdir(directory_path):
                 if filename.endswith(ALLOWED_FILE_TYPES):
                     image_path = os.path.join(directory_path, filename)
-                    #name = os.path.splitext(filename)[0]  # Use the filename (without extension) as the card name
                     print(f'Processing {image_path}')
                     embedding = processAndEncodeImage(file_path=image_path).cpu().numpy().tolist()
                     self.embeddings.append({'name': directory_name, 'embedding': embedding})
